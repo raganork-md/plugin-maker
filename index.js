@@ -4,12 +4,10 @@ const axios = require('axios');
 const http = require('http');
 require('dotenv').config();
 
-// Configuration from Environment Variables
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-// The strict guide for Gemini to follow Raganork-MD structure
 const RAGANORK_GUIDE = `
 You are an expert developer for the Raganork-MD WhatsApp bot.
 Task: Create or Fix a plugin based on the user's request.
@@ -41,7 +39,6 @@ STRICT RULES:
 6. Return ONLY the code inside a javascript markdown block.
 `;
 
-// Function to Create GitHub Gist
 async function createGist(description, content) {
     try {
         const response = await axios.post('https://api.github.com/gists', {
@@ -62,7 +59,7 @@ async function createGist(description, content) {
 }
 
 bot.start((ctx) => {
-    ctx.replyWithMarkdown('👋 *Welcome to Raganork Plugin Maker AI!*\n\nI can create high-quality plugins or fix your existing code errors.\n\n*Commands:*\n- `Create a plugin for [task]`\n- `Fix this error: [log] [code]`');
+    ctx.replyWithMarkdown('👋 *Welcome to Raganork Plugin Maker AI!*\n\nI can create high-quality plugins or fix code errors.\n\n*Commands:*\n- `Create a plugin for [task]`\n- `Fix this error: [log] [code]`');
 });
 
 bot.on('text', async (ctx) => {
@@ -72,14 +69,14 @@ bot.on('text', async (ctx) => {
     const waitMsg = await ctx.reply(isFixing ? '🔍 _Analyzing and fixing code..._ ' : '🚀 _Generating Raganork plugin..._ ', { parse_mode: 'Markdown' });
 
     try {
-        // Initialize Gemini 1.5 Flash
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // CHANGED: Using "gemini-pro" for better compatibility if flash is not found
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" }); 
         const prompt = `${RAGANORK_GUIDE}\n\nUser Request: ${userInput}`;
         
         const result = await model.generateContent(prompt);
-        const aiText = result.response.text();
+        const response = await result.response;
+        const aiText = response.text();
 
-        // Extract code block from AI response
         const codeMatch = aiText.match(/```javascript([\s\S]*?)```/);
         const pluginCode = codeMatch ? codeMatch[1].trim() : null;
 
@@ -102,20 +99,16 @@ bot.on('text', async (ctx) => {
         }
 
     } catch (error) {
-        console.error(error);
-        ctx.reply('❌ *Error:* Processing failed. Check your API Keys.');
+        console.error("Gemini Error:", error);
+        ctx.reply('❌ *Error:* Gemini AI failed. Check if your API Key is valid and has access to Gemini Pro.');
     }
 });
 
-// Port binding for Render
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.write('Raganork AI Bot is Online!');
     res.end();
 });
 
-server.listen(process.env.PORT || 8080, () => {
-    console.log("Server running on port " + (process.env.PORT || 8080));
-});
-
+server.listen(process.env.PORT || 8080);
 bot.launch();
