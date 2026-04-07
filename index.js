@@ -7,8 +7,10 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-const RAGANORK_GUIDE = `You are an expert developer for Raganork-MD WhatsApp bot. 
-Create or Fix a plugin using this exact structure:
+// Expert instructions for Gemini 3 Pro
+const RAGANORK_GUIDE = `You are an elite developer specializing in Raganork-MD WhatsApp bot. 
+Task: Generate or Fix plugins.
+Structure:
 const { Module } = require('../main');
 const config = require('../config');
 const { getTempPath } = require('../core/helpers');
@@ -21,12 +23,16 @@ Module({
     usage: 'usage'
 }, async (message, match) => {
     try {
-        // logic
+        // Logic
     } catch (e) {
         await message.sendReply('_Error: ' + e.message + '_');
     }
 });
-Rules: Use message.sendMessage/sendReply and fs.createReadStream for media. Return ONLY the code inside a javascript markdown block.`;
+
+Rules:
+- Use message.sendMessage, message.sendReply, or message.edit.
+- Use fs.createReadStream for media.
+- Return ONLY the raw javascript code inside markdown blocks.`;
 
 async function createGist(description, content) {
     const response = await axios.post('https://api.github.com/gists', {
@@ -41,28 +47,30 @@ async function createGist(description, content) {
 
 bot.on('text', async (ctx) => {
     const userInput = ctx.message.text;
-    if (userInput.startsWith('/start')) return ctx.reply('Send a request to create a plugin.');
+    if (userInput.startsWith('/start')) return ctx.reply('🚀 Send a request to generate a Raganork plugin using Gemini 3 Pro.');
 
-    const waitMsg = await ctx.reply('_AI is processing..._');
+    const waitMsg = await ctx.reply('🧠 _Gemini 3 Pro is thinking..._');
 
     try {
-        // Direct Axios call to Gemini API v1beta
-        const aiResponse = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-            {
-                contents: [{ parts: [{ text: `${RAGANORK_GUIDE}\n\nUser Request: ${userInput}` }] }]
-            }
-        );
+        // Updated to Gemini 3 Pro for maximum accuracy
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:generateContent?key=${GEMINI_API_KEY}`;
+        
+        const aiResponse = await axios.post(url, {
+            contents: [{ parts: [{ text: `${RAGANORK_GUIDE}\n\nUser Request: ${userInput}` }] }]
+        });
+
+        if (!aiResponse.data.candidates) {
+            throw new Error("Gemini 3 Pro is currently unavailable or your API key lacks access.");
+        }
 
         const aiText = aiResponse.data.candidates[0].content.parts[0].text;
-
         const codeMatch = aiText.match(/```javascript([\s\S]*?)```/) || aiText.match(/```([\s\S]*?)```/);
         const pluginCode = codeMatch ? codeMatch[1].trim() : aiText.trim();
 
         if (pluginCode.includes('Module')) {
             const gist = await createGist("Raganork Plugin", pluginCode);
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, 
-                `✅ *Plugin Ready!*\n\n🔗 *Gist:* ${gist.html_url}`, 
+                `✅ *Plugin Created with Gemini 3 Pro!*\n\n🔗 *Gist:* ${gist.html_url}`, 
                 { 
                     parse_mode: 'Markdown', 
                     disable_web_page_preview: true,
@@ -73,11 +81,11 @@ bot.on('text', async (ctx) => {
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, aiText);
         }
     } catch (error) {
-        console.error("DEBUG ERROR:", error.response ? error.response.data : error.message);
-        const errMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* API issue. Please check your Gemini Key.`);
+        console.error("DEBUG:", error.response ? error.response.data : error.message);
+        const errorDetail = error.response?.data?.error?.message || error.message;
+        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* ${errorDetail}`);
     }
 });
 
-http.createServer((req, res) => { res.write('Bot Running'); res.end(); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.write('Gemini 3 Bot Active'); res.end(); }).listen(process.env.PORT || 8080);
 bot.launch();
