@@ -7,9 +7,8 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-// Expert instructions for Gemini 3 Pro
-const RAGANORK_GUIDE = `You are an elite developer specializing in Raganork-MD WhatsApp bot. 
-Task: Generate or Fix plugins.
+const RAGANORK_GUIDE = `You are an elite developer for Raganork-MD WhatsApp bot. 
+Task: Generate/Fix plugin.
 Structure:
 const { Module } = require('../main');
 const config = require('../config');
@@ -28,11 +27,7 @@ Module({
         await message.sendReply('_Error: ' + e.message + '_');
     }
 });
-
-Rules:
-- Use message.sendMessage, message.sendReply, or message.edit.
-- Use fs.createReadStream for media.
-- Return ONLY the raw javascript code inside markdown blocks.`;
+Return ONLY the code.`;
 
 async function createGist(description, content) {
     const response = await axios.post('https://api.github.com/gists', {
@@ -45,32 +40,45 @@ async function createGist(description, content) {
     return response.data;
 }
 
+// Function to call Gemini with Fallback
+async function callGemini(prompt) {
+    const models = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"];
+    let lastError = "";
+
+    for (let modelName of models) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+            const response = await axios.post(url, {
+                contents: [{ parts: [{ text: prompt }] }]
+            });
+            if (response.data.candidates && response.data.candidates[0].content) {
+                return response.data.candidates[0].content.parts[0].text;
+            }
+        } catch (e) {
+            lastError = e.response?.data?.error?.message || e.message;
+            console.log(`Model ${modelName} failed, trying next...`);
+            continue; 
+        }
+    }
+    throw new Error(lastError);
+}
+
 bot.on('text', async (ctx) => {
     const userInput = ctx.message.text;
-    if (userInput.startsWith('/start')) return ctx.reply('🚀 Send a request to generate a Raganork plugin using Gemini 3 Pro.');
+    if (userInput.startsWith('/start')) return ctx.reply('🚀 Send your plugin request. Powered by Gemini AI.');
 
-    const waitMsg = await ctx.reply('🧠 _Gemini 3 Pro is thinking..._');
+    const waitMsg = await ctx.reply('🧠 _AI is analyzing your request..._');
 
     try {
-        // Updated to Gemini 3 Pro for maximum accuracy
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:generateContent?key=${GEMINI_API_KEY}`;
+        const aiText = await callGemini(`${RAGANORK_GUIDE}\n\nUser Request: ${userInput}`);
         
-        const aiResponse = await axios.post(url, {
-            contents: [{ parts: [{ text: `${RAGANORK_GUIDE}\n\nUser Request: ${userInput}` }] }]
-        });
-
-        if (!aiResponse.data.candidates) {
-            throw new Error("Gemini 3 Pro is currently unavailable or your API key lacks access.");
-        }
-
-        const aiText = aiResponse.data.candidates[0].content.parts[0].text;
         const codeMatch = aiText.match(/```javascript([\s\S]*?)```/) || aiText.match(/```([\s\S]*?)```/);
-        const pluginCode = codeMatch ? codeMatch[1].trim() : aiText.trim();
+        const pluginCode = codeMatch ? codeMatch[1].trim() : (aiText.includes('Module') ? aiText.trim() : null);
 
-        if (pluginCode.includes('Module')) {
+        if (pluginCode) {
             const gist = await createGist("Raganork Plugin", pluginCode);
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, 
-                `✅ *Plugin Created with Gemini 3 Pro!*\n\n🔗 *Gist:* ${gist.html_url}`, 
+                `✅ *Plugin Generated!*\n\n🔗 *Gist:* ${gist.html_url}`, 
                 { 
                     parse_mode: 'Markdown', 
                     disable_web_page_preview: true,
@@ -81,11 +89,9 @@ bot.on('text', async (ctx) => {
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, aiText);
         }
     } catch (error) {
-        console.error("DEBUG:", error.response ? error.response.data : error.message);
-        const errorDetail = error.response?.data?.error?.message || error.message;
-        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* ${errorDetail}`);
+        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* ${error.message}\n\nPlease verify your GEMINI_API_KEY in Render.`);
     }
 });
 
-http.createServer((req, res) => { res.write('Gemini 3 Bot Active'); res.end(); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.write('Bot Active'); res.end(); }).listen(process.env.PORT || 8080);
 bot.launch();
