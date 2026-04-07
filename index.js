@@ -1,13 +1,25 @@
 const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const http = require('http');
-require('dotenv').config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-const RAGANORK_GUIDE = `Expert Raganork-MD Developer. Return ONLY javascript code. Use Module({pattern...}) structure.`;
+// AI-യിലേക്ക് റിക്വസ്റ്റ് അയക്കാനുള്ള ഫംഗ്‌ഷൻ (No API Key needed)
+async function getFreeAIResponse(prompt) {
+    try {
+        // ഇതാരു ഫ്രീ സർവീസ് പ്രൊവൈഡർ ആണ്, പലപ്പോഴും മാറാൻ സാധ്യതയുണ്ട്
+        const response = await axios.get(`https://api.aggelos-007.xyz/ai?prompt=${encodeURIComponent(prompt)}`);
+        return response.data.response;
+    } catch (e) {
+        // ഒന്നാമത്തെ വഴി നടന്നില്ലെങ്കിൽ രണ്ടാമത്തെ വഴി (Blackbox AI)
+        const blackbox = await axios.post('https://www.blackbox.ai/api/chat', {
+            messages: [{ role: 'user', content: prompt }],
+            model: 'deepseek-v3'
+        });
+        return blackbox.data;
+    }
+}
 
 async function createGist(content) {
     const response = await axios.post('https://api.github.com/gists', {
@@ -17,42 +29,24 @@ async function createGist(content) {
     }, {
         headers: { Authorization: `token ${GITHUB_TOKEN}` }
     });
-    return response.data;
+    return response.data.html_url;
 }
 
 bot.on('text', async (ctx) => {
-    const userInput = ctx.message.text;
-    if (userInput.startsWith('/')) return;
-
-    const waitMsg = await ctx.reply('⏳ _Almost there... Gemini is generating code..._');
-
+    const waitMsg = await ctx.reply('🔍 _Thinking without API Key..._');
     try {
-        // ഇതാണ് ഏറ്റവും സ്റ്റേബിൾ ആയ ലിങ്ക് (v1beta)
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+        const aiText = await getFreeAIResponse(`Act as Raganork-MD plugin maker. Code only: ${ctx.message.text}`);
         
-        const aiResponse = await axios.post(url, {
-            contents: [{ parts: [{ text: `${RAGANORK_GUIDE}\nUser: ${userInput}` }] }]
-        });
-
-        const aiText = aiResponse.data.candidates[0].content.parts[0].text;
-        const codeMatch = aiText.match(/```javascript([\s\S]*?)```/) || aiText.match(/```([\s\S]*?)```/);
-        const pluginCode = codeMatch ? codeMatch[1].trim() : (aiText.includes('Module') ? aiText.trim() : null);
-
-        if (pluginCode) {
-            const gist = await createGist(pluginCode);
-            await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, 
-                `✅ *Success!*\n\n🔗 *Link:* ${gist.html_url}`, 
-                { parse_mode: 'Markdown', ...Markup.inlineKeyboard([Markup.button.url('📂 View Code', gist.html_url)]) }
-            );
+        if (aiText.includes('Module')) {
+            const link = await createGist(aiText);
+            await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `✅ *Ready!*\n🔗 ${link}`, { parse_mode: 'Markdown' });
         } else {
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, aiText);
         }
-    } catch (error) {
-        // കൃത്യമായ എറർ ബോഡി ഇവിടെ കാണിക്കും
-        const detailedError = error.response ? JSON.stringify(error.response.data.error.message) : error.message;
-        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *API Error:* ${detailedError}\n\n_Check your key again._`);
+    } catch (err) {
+        await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, "❌ AI is busy. Try again.");
     }
 });
 
-http.createServer((req, res) => { res.write('Online'); res.end(); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('Running'); }).listen(process.env.PORT || 8080);
 bot.launch();
