@@ -1,14 +1,10 @@
 const { Telegraf, Markup } = require('telegraf');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const axios = require('axios');
 const http = require('http');
 require('dotenv').config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-
-// VERSION FIX: Adding 'v1beta' to the client configuration
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
 const RAGANORK_GUIDE = `You are an expert developer for Raganork-MD WhatsApp bot. 
@@ -50,11 +46,15 @@ bot.on('text', async (ctx) => {
     const waitMsg = await ctx.reply('_AI is processing..._');
 
     try {
-        // FORCE MODEL VERSION: gemini-1.5-flash
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: 'v1beta' });
-        
-        const result = await model.generateContent(`${RAGANORK_GUIDE}\n\nUser Request: ${userInput}`);
-        const aiText = result.response.text();
+        // Direct Axios call to Gemini API v1beta
+        const aiResponse = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+                contents: [{ parts: [{ text: `${RAGANORK_GUIDE}\n\nUser Request: ${userInput}` }] }]
+            }
+        );
+
+        const aiText = aiResponse.data.candidates[0].content.parts[0].text;
 
         const codeMatch = aiText.match(/```javascript([\s\S]*?)```/) || aiText.match(/```([\s\S]*?)```/);
         const pluginCode = codeMatch ? codeMatch[1].trim() : aiText.trim();
@@ -73,8 +73,9 @@ bot.on('text', async (ctx) => {
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, aiText);
         }
     } catch (error) {
-        console.error("DEBUG ERROR:", error);
-        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* ${error.message}\nTry again in a moment.`);
+        console.error("DEBUG ERROR:", error.response ? error.response.data : error.message);
+        const errMsg = error.response ? JSON.stringify(error.response.data) : error.message;
+        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* API issue. Please check your Gemini Key.`);
     }
 });
 
