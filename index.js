@@ -6,12 +6,12 @@ require('dotenv').config();
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-// Fixed Group ID
+// നിങ്ങൾ നൽകിയ ഗ്രൂപ്പ് ഐഡി
 const ALLOWED_GROUP_ID = "-1003849356645"; 
 
 const RAGANORK_SYSTEM_PROMPT = `
-You are an expert Raganork-MD plugin developer.
-STRICTLY use the following base structure for all plugins:
+You are an expert Raganork-MD developer. 
+Generate plugins ONLY using this strict base structure:
 
 const { Module } = require('../main');
 const config = require('../config');
@@ -25,28 +25,30 @@ Module({
     usage: 'usage'
 }, async (message, match) => {
     try {
-        // Logic (Use message.sendReply for text)
+        // Your logic here
     } catch (e) {
         await message.sendReply('_Error: ' + e.message + '_');
     }
 });
 
 RULES:
-- If user says "create": Build a new plugin with the above format.
-- If user says "fix": Correct the provided code using the same structure.
-- If a downloader is requested: Use const apiUrl = 'https://api-placeholder.com/dl?url=' + match[1];
-- Always add this note at the end of the code: "// NOTE: Replace the fake API URL with a real working one."
-- Return ONLY the javascript code inside markdown blocks.
+1. ONLY return the code inside javascript markdown blocks.
+2. For downloaders, use a placeholder API URL (e.g., https://api-placeholder.com/dl?url=).
+3. DO NOT add any notes or warnings inside the code.
+4. If it is a reply to the bot (not starting with create), act as a helpful AI assistant.
 `;
 
 async function createGist(pluginContent) {
     try {
         const response = await axios.post('https://api.github.com/gists', {
-            description: "Raganork-MD AI Plugin/Fix",
+            description: "Raganork-MD AI Plugin",
             public: true,
             files: { 'plugin.js': { content: pluginCodeCleanup(pluginContent) } }
         }, {
-            headers: { Authorization: `token ${GITHUB_TOKEN}` }
+            headers: { 
+                Authorization: `token ${GITHUB_TOKEN}`,
+                'Content-Type': 'application/json'
+            }
         });
         return response.data;
     } catch (error) {
@@ -60,35 +62,37 @@ function pluginCodeCleanup(text) {
 }
 
 bot.on('text', async (ctx) => {
-    // 1. ഗ്രൂപ്പ് ഐഡി ചെക്ക്
     if (ctx.chat.id.toString() !== ALLOWED_GROUP_ID) return;
 
     const userRequest = ctx.message.text.trim();
     const lowText = userRequest.toLowerCase();
     
-    // 2. റിപ്ലൈ മോഡ് ചെക്ക് (ബോട്ടിന്റെ മെസ്സേജിനാണോ റിപ്ലൈ എന്ന് നോക്കുന്നു)
     const isReplyToBot = ctx.message.reply_to_message && ctx.message.reply_to_message.from.id === ctx.botInfo.id;
-    
-    // 3. കീവേഡ് ചെക്ക്
     const isCreate = lowText.startsWith('create');
-    const isFix = lowText.includes('fix');
 
-    // ലോജിക്: 'create' എന്ന് തുടങ്ങണം, അല്ലെങ്കിൽ 'fix' ഉണ്ടാവണം, അല്ലെങ്കിൽ ബോട്ടിന് റിപ്ലൈ ആയിരിക്കണം
-    if (!isCreate && !isFix && !isReplyToBot) return;
+    if (!isCreate && !isReplyToBot) return;
 
-    const waitMsg = await ctx.reply('⏳ _Processing request..._');
+    const waitMsg = await ctx.reply('⏳ _Processing..._');
 
     try {
         const apiUrl = `https://gemin-api-weld.vercel.app/api/generateContent?q=${encodeURIComponent(RAGANORK_SYSTEM_PROMPT + "\n\nUser: " + userRequest)}`;
         const res = await axios.get(apiUrl);
         const aiResponse = res.data.response;
 
-        // കോഡ് ഉണ്ടെങ്കിൽ Gist ആക്കുന്നു
-        if (aiResponse && aiResponse.includes('Module')) {
+        if (isCreate && aiResponse.includes('Module')) {
             const gistData = await createGist(aiResponse);
             if (gistData) {
-                await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, 
-                    `✅ *Raganork Plugin Ready!*\n\n🔗 *Gist:* ${gistData.html_url}`, 
+                // ഡൗൺലോഡർ ആണോ എന്ന് ഇവിടെ കൃത്യമായി പരിശോധിക്കുന്നു
+                const isDownloader = lowText.includes('download') || lowText.includes('dl');
+                
+                let caption = `✅ *Raganork Plugin Created!*\n\n🔗 *Gist:* ${gistData.html_url}`;
+                
+                // ഡൗൺലോഡർ ആണെങ്കിൽ മാത്രം ഈ ഇംഗ്ലീഷ് വാണിംഗ് ചേർക്കും
+                if (isDownloader) {
+                    caption += `\n\n⚠️ *External Warning:* This downloader plugin uses a placeholder API URL. You must replace it with a real, working API URL in the code for it to function correctly.`;
+                }
+
+                await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, caption, 
                     { 
                         parse_mode: 'Markdown', 
                         disable_web_page_preview: true,
@@ -96,16 +100,16 @@ bot.on('text', async (ctx) => {
                     }
                 );
             } else {
-                await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, "❌ Gist failed. Here is the raw code:\n\n" + aiResponse);
+                await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, "❌ Gist Error! Check your settings.");
             }
         } else {
-            // വെറും ചാറ്റ് റിപ്ലൈ
+            // സാധാരണ AI റിപ്ലൈ
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, aiResponse);
         }
     } catch (err) {
-        await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, "❌ API unreachable. Check connection.");
+        await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, "❌ Connection lost. Try again.");
     }
 });
 
-http.createServer((req, res) => { res.end('Raganork AI Service Running'); }).listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.end('Raganork AI Online'); }).listen(process.env.PORT || 8080);
 bot.launch();
