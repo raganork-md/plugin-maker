@@ -69,13 +69,11 @@ bot.on('text', async (ctx) => {
     const waitMsg = await ctx.reply(isFixing ? '🔍 _Analyzing and fixing code..._ ' : '🚀 _Generating Raganork plugin..._ ', { parse_mode: 'Markdown' });
 
     try {
-        // CHANGED: Using "gemini-pro" for better compatibility if flash is not found
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" }); 
-        const prompt = `${RAGANORK_GUIDE}\n\nUser Request: ${userInput}`;
+        // Updated model name to gemini-1.5-flash
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
         
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const aiText = response.text();
+        const result = await model.generateContent([RAGANORK_GUIDE, userInput]);
+        const aiText = result.response.text();
 
         const codeMatch = aiText.match(/```javascript([\s\S]*?)```/);
         const pluginCode = codeMatch ? codeMatch[1].trim() : null;
@@ -84,7 +82,7 @@ bot.on('text', async (ctx) => {
             const gist = await createGist(isFixing ? "Fixed Raganork Plugin" : "New Raganork Plugin", pluginCode);
             
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, 
-                `✅ *${isFixing ? 'Error Fixed!' : 'Plugin Created!'}*\n\n*Gist ID:* \`${gist.id}\` \n\n🔗 *Gist Link:* ${gist.html_url}\n\n_Note: This link is permanent unless deleted manually._`, 
+                `✅ *${isFixing ? 'Error Fixed!' : 'Plugin Created!'}*\n\n*Gist ID:* \`${gist.id}\` \n\n🔗 *Gist Link:* ${gist.html_url}\n\n_Note: This link is permanent._`, 
                 { 
                     parse_mode: 'Markdown',
                     disable_web_page_preview: true,
@@ -100,7 +98,7 @@ bot.on('text', async (ctx) => {
 
     } catch (error) {
         console.error("Gemini Error:", error);
-        ctx.reply('❌ *Error:* Gemini AI failed. Check if your API Key is valid and has access to Gemini Pro.');
+        ctx.reply('❌ *Error:* Processing failed. Check if your API Key is valid in Render Environment Variables.');
     }
 });
 
