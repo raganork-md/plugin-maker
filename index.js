@@ -5,7 +5,10 @@ const http = require('http');
 require('dotenv').config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// VERSION FIX: Adding 'v1beta' to the client configuration
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
 const RAGANORK_GUIDE = `You are an expert developer for Raganork-MD WhatsApp bot. 
@@ -27,7 +30,7 @@ Module({
         await message.sendReply('_Error: ' + e.message + '_');
     }
 });
-Rules: Use message.sendMessage/sendReply and fs.createReadStream for media. Return ONLY the code.`;
+Rules: Use message.sendMessage/sendReply and fs.createReadStream for media. Return ONLY the code inside a javascript markdown block.`;
 
 async function createGist(description, content) {
     const response = await axios.post('https://api.github.com/gists', {
@@ -47,8 +50,8 @@ bot.on('text', async (ctx) => {
     const waitMsg = await ctx.reply('_AI is processing..._');
 
     try {
-        // കൃത്യമായ മോഡൽ പേര് ഇവിടെ ഉറപ്പാക്കുന്നു
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // FORCE MODEL VERSION: gemini-1.5-flash
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: 'v1beta' });
         
         const result = await model.generateContent(`${RAGANORK_GUIDE}\n\nUser Request: ${userInput}`);
         const aiText = result.response.text();
@@ -60,14 +63,18 @@ bot.on('text', async (ctx) => {
             const gist = await createGist("Raganork Plugin", pluginCode);
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, 
                 `✅ *Plugin Ready!*\n\n🔗 *Gist:* ${gist.html_url}`, 
-                { parse_mode: 'Markdown', ...Markup.inlineKeyboard([Markup.button.url('📂 View Code', gist.html_url)]) }
+                { 
+                    parse_mode: 'Markdown', 
+                    disable_web_page_preview: true,
+                    ...Markup.inlineKeyboard([Markup.button.url('📂 View Code', gist.html_url)]) 
+                }
             );
         } else {
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, aiText);
         }
     } catch (error) {
-        console.error("DEBUG ERROR:", error); // ഇത് Render Logs-ൽ കാണാൻ സഹായിക്കും
-        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* ${error.message}\nCheck Render Logs for details.`);
+        console.error("DEBUG ERROR:", error);
+        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* ${error.message}\nTry again in a moment.`);
     }
 });
 
