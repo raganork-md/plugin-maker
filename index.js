@@ -8,105 +8,68 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-const RAGANORK_GUIDE = `
-You are an expert developer for the Raganork-MD WhatsApp bot.
-Task: Create or Fix a plugin based on the user's request.
+const RAGANORK_GUIDE = `You are an expert developer for Raganork-MD WhatsApp bot. 
+Create or Fix a plugin using this exact structure:
+const { Module } = require('../main');
+const config = require('../config');
+const { getTempPath } = require('../core/helpers');
+const fs = require('fs');
 
-STRICT RULES:
-1. Always use this structure:
-   const { Module } = require('../main');
-   const config = require('../config');
-   const { getTempPath } = require('../core/helpers');
-   const fs = require('fs');
-
-   Module({
-       pattern: 'command ?(.*)',
-       desc: 'Description here',
-       use: 'category',
-       usage: 'usage example'
-   }, async (message, match) => {
-       try {
-           // Logic here
-       } catch (e) {
-           await message.sendReply('_Error: ' + e.message + '_');
-       }
-   });
-
-2. Use 'message.sendMessage' or 'message.sendReply' for responses.
-3. Use 'fs.createReadStream' for sending media (images/videos/audio).
-4. For fixing errors: Analyze the user's error log, find the bug, and provide the fully corrected code.
-5. Use Raganork-style italics (_text_) for bot messages.
-6. Return ONLY the code inside a javascript markdown block.
-`;
+Module({
+    pattern: 'command ?(.*)',
+    desc: 'Description',
+    use: 'category',
+    usage: 'usage'
+}, async (message, match) => {
+    try {
+        // logic
+    } catch (e) {
+        await message.sendReply('_Error: ' + e.message + '_');
+    }
+});
+Rules: Use message.sendMessage/sendReply and fs.createReadStream for media. Return ONLY the code.`;
 
 async function createGist(description, content) {
-    try {
-        const response = await axios.post('https://api.github.com/gists', {
-            description: description,
-            public: true,
-            files: { 'plugin.js': { content: content } }
-        }, {
-            headers: { 
-                Authorization: `token ${GITHUB_TOKEN}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        return response.data;
-    } catch (error) {
-        console.error("Gist Error:", error.response ? error.response.data : error.message);
-        throw new Error("Failed to create Gist");
-    }
+    const response = await axios.post('https://api.github.com/gists', {
+        description: description,
+        public: true,
+        files: { 'plugin.js': { content: content } }
+    }, {
+        headers: { Authorization: `token ${GITHUB_TOKEN}` }
+    });
+    return response.data;
 }
-
-bot.start((ctx) => {
-    ctx.replyWithMarkdown('👋 *Welcome to Raganork Plugin Maker AI!*\n\nI can create high-quality plugins or fix code errors.\n\n*Commands:*\n- `Create a plugin for [task]`\n- `Fix this error: [log] [code]`');
-});
 
 bot.on('text', async (ctx) => {
     const userInput = ctx.message.text;
-    const isFixing = userInput.toLowerCase().includes('fix') || userInput.toLowerCase().includes('error');
-    
-    const waitMsg = await ctx.reply(isFixing ? '🔍 _Analyzing and fixing code..._ ' : '🚀 _Generating Raganork plugin..._ ', { parse_mode: 'Markdown' });
+    if (userInput.startsWith('/start')) return ctx.reply('Send a request to create a plugin.');
+
+    const waitMsg = await ctx.reply('_AI is processing..._');
 
     try {
-        // Updated model name to gemini-1.5-flash
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
+        // കൃത്യമായ മോഡൽ പേര് ഇവിടെ ഉറപ്പാക്കുന്നു
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
         
-        const result = await model.generateContent([RAGANORK_GUIDE, userInput]);
+        const result = await model.generateContent(`${RAGANORK_GUIDE}\n\nUser Request: ${userInput}`);
         const aiText = result.response.text();
 
-        const codeMatch = aiText.match(/```javascript([\s\S]*?)```/);
-        const pluginCode = codeMatch ? codeMatch[1].trim() : null;
+        const codeMatch = aiText.match(/```javascript([\s\S]*?)```/) || aiText.match(/```([\s\S]*?)```/);
+        const pluginCode = codeMatch ? codeMatch[1].trim() : aiText.trim();
 
-        if (pluginCode) {
-            const gist = await createGist(isFixing ? "Fixed Raganork Plugin" : "New Raganork Plugin", pluginCode);
-            
+        if (pluginCode.includes('Module')) {
+            const gist = await createGist("Raganork Plugin", pluginCode);
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, 
-                `✅ *${isFixing ? 'Error Fixed!' : 'Plugin Created!'}*\n\n*Gist ID:* \`${gist.id}\` \n\n🔗 *Gist Link:* ${gist.html_url}\n\n_Note: This link is permanent._`, 
-                { 
-                    parse_mode: 'Markdown',
-                    disable_web_page_preview: true,
-                    ...Markup.inlineKeyboard([
-                        [Markup.button.url('📂 View Code', gist.html_url)],
-                        [Markup.button.url('🍴 Fork Gist', `https://gist.github.com/${gist.id}/fork`)]
-                    ])
-                }
+                `✅ *Plugin Ready!*\n\n🔗 *Gist:* ${gist.html_url}`, 
+                { parse_mode: 'Markdown', ...Markup.inlineKeyboard([Markup.button.url('📂 View Code', gist.html_url)]) }
             );
         } else {
             await ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, aiText);
         }
-
     } catch (error) {
-        console.error("Gemini Error:", error);
-        ctx.reply('❌ *Error:* Processing failed. Check if your API Key is valid in Render Environment Variables.');
+        console.error("DEBUG ERROR:", error); // ഇത് Render Logs-ൽ കാണാൻ സഹായിക്കും
+        ctx.telegram.editMessageText(ctx.chat.id, waitMsg.message_id, null, `❌ *Error:* ${error.message}\nCheck Render Logs for details.`);
     }
 });
 
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.write('Raganork AI Bot is Online!');
-    res.end();
-});
-
-server.listen(process.env.PORT || 8080);
+http.createServer((req, res) => { res.write('Bot Running'); res.end(); }).listen(process.env.PORT || 8080);
 bot.launch();
